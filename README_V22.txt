@@ -1,0 +1,1 @@
+V22: Chrome o‘zbekcha nutqni tanish seansi tabiiy tugaganda uzilish deb hisoblanmaydi. Qisqa seanslar avtomatik davom ettiriladi, interim natija yakuniy bo‘lmay qolsa saqlanadi. Diagnostika kengaytirildi. MyMemory/LibreTranslate V21 dagidek saqlangan. Haqiqiy brauzer sinovi talab etiladi.

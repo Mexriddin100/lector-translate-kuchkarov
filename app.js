@@ -110,9 +110,10 @@ function acceptRecognizedSpeech(result){
 }
 // V21: permission check, observable start, bounded retries and actionable errors.
 let micStartupTimer=null, micRetryCount=0, micLastError='', micStarting=false;
+let micLastResultAt=0, micLastInterim='', micLastInterimAt=0, micLastStartAt=0, micLastEndAt=0, micLastEvent='';
 function resetMicButtons(){ $('start').disabled=false; $('stop').disabled=true; }
 function stopMicSession(message){
- listening=false;micStarting=false;recognitionRunning=false;clearTimeout(restartTimer);clearTimeout(micStartupTimer);
+ listening=false;micStarting=false;recognitionRunning=false;clearTimeout(restartTimer);clearTimeout(micStartupTimer);micLastEvent='stopped';
  stopVoiceGate();if(recognition){try{recognition.abort()}catch{}}resetMicButtons();
  if(message)notify('micstatus',message);
 }
@@ -147,13 +148,13 @@ $('start').onclick=async()=>{
  }
  if(!micStarting)return;
  try{
-  recognition=new SR();recognition.lang=speechLang[$('source').value];recognition.continuous=true;
+  recognition=new SR();recognition.lang=speechLang[$('source').value];recognition.continuous=false;
   recognition.interimResults=true;recognition.maxAlternatives=1;applyRecognitionHints();
  }catch(e){micStarting=false;resetMicButtons();notify('micstatus','Nutqni aniqlash ishga tushmadi: '+e.message);return}
- listening=true;micStarting=false;micRetryCount=0;micLastError='';lastAcceptedSpeech='';recognitionRunning=false;
+ listening=true;micStarting=false;micRetryCount=0;micLastError='';lastAcceptedSpeech='';recognitionRunning=false;micLastInterim='';micLastEvent='starting';
  voiceSeenAt=Date.now();recognitionStartedAt=Date.now();
  recognition.onstart=()=>{
-  clearTimeout(micStartupTimer);micRetryCount=0;micLastError='';recognitionStartedAt=Date.now();
+  clearTimeout(micStartupTimer);micLastError='';micLastStartAt=Date.now();micLastEvent='started';recognitionStartedAt=Date.now();
   previousResultKeys.clear();lastRenderedInterim='';lastInterimText='';lastInterimVoiceAt=0;
   lastInterimAt=0;lastVoiceAtRecognitionStart=voiceSeenAt;recognitionRunning=true;
   if(!speechPlayback)notify('micstatus','🎙 Mikrofon faol. Gapiring — nutq stenogrammada paydo bo‘ladi.');
@@ -163,9 +164,9 @@ $('start').onclick=async()=>{
   let interim='';
   for(let i=e.resultIndex;i<e.results.length;i++){
    const result=e.results[i],candidate=result[0];
-   if(result.isFinal)acceptRecognizedSpeech(candidate);
+   if(result.isFinal){micLastResultAt=Date.now();micRetryCount=0;micLastInterim='';acceptRecognizedSpeech(candidate);}
    else{
-    interim+=candidate.transcript;lastInterimText=candidate.transcript;
+    interim+=candidate.transcript;lastInterimText=candidate.transcript;micLastInterim=candidate.transcript;micLastInterimAt=Date.now();micLastResultAt=Date.now();micRetryCount=0;
     if(lastRenderedInterim!==candidate.transcript){lastRenderedInterim=candidate.transcript;logSpeech('INTERIM: '+JSON.stringify(candidate.transcript))}
     lastInterimAt=Date.now();if(!speechGateEnabled||Date.now()-voiceSeenAt<550)lastInterimVoiceAt=Date.now();
    }
@@ -174,7 +175,7 @@ $('start').onclick=async()=>{
   else notify('micstatus','🎙 Mikrofon faol');
  };
  recognition.onerror=e=>{
-  logSpeech('ERROR: '+e.error);micLastError=e.error;
+  logSpeech('ERROR: '+e.error);micLastError=e.error;micLastEvent='error:'+e.error;
   if(e.error==='aborted'&&(!listening||speechPlayback))return;
   if(e.error==='no-speech'){notify('micstatus','Nutq eshitilmadi; qayta tinglashga urinilmoqda.');return}
   notify('micstatus',microphoneErrorMessage(e.error));
@@ -183,10 +184,20 @@ $('start').onclick=async()=>{
   }
  };
  recognition.onend=()=>{
-  logSpeech('END; listening='+listening+' error='+micLastError);recognitionRunning=false;
+  logSpeech('END; listening='+listening+' error='+micLastError);recognitionRunning=false;micLastEndAt=Date.now();micLastEvent='ended';
   if(!listening||speechPlayback)return;
-  if(++micRetryCount>8){stopMicSession('Nutqni aniqlash takroran uzildi. Chrome/Edge va internetni tekshiring, so‘ng qayta boshlang.');return}
-  notify('micstatus','Mikrofon qayta ulanmoqda ('+micRetryCount+'/8)...');restartRecognition();
+  // Chrome sometimes ends a session after a short phrase without emitting a final result.
+  // Preserve a recently heard interim transcript instead of silently discarding it.
+  if(micLastInterim&&Date.now()-micLastInterimAt<6000){
+   const interimText=micLastInterim;micLastInterim='';
+   acceptRecognizedSpeech({transcript:interimText,confidence:0});
+  }
+  if(micLastError&&micLastError!=='no-speech'&&micLastError!=='aborted'){
+   stopMicSession(microphoneErrorMessage(micLastError));return;
+  }
+  // Short recognition sessions ending normally are expected, not repeated failures.
+  // Restart while the teacher wants to listen, without a fixed 8-attempt cutoff.
+  notify('micstatus','🎙 Tinglash davom etmoqda — yangi nutq kutilmoqda...');restartRecognition();
  };
  try{
   recognition.start();
@@ -246,4 +257,4 @@ const diagnostics=document.getElementById('diagnostics');if(diagnostics){const i
 $('translationMode').addEventListener('change',async()=>{const next=$('translationMode').value;if(next==='professional'&&!professionalAvailable){$('translationMode').value=activeMode;notify('modeStatus','Professional AI ulanmagan. Serverda OPENAI_API_KEY sozlash kerak.');return}if(next==='professional'&&!session){$('translationMode').value=activeMode;notify('modeStatus','Professional AI uchun avval sessiya yarating.');return}if(session){try{const r=await fetch('/api/mode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:session.id,key:session.key,mode:next})});const j=await r.json();if(!r.ok)throw Error(j.error||'Rejim almashtirilmadi')}catch(e){$('translationMode').value=activeMode;notify('modeStatus',e.message);return}}activeMode=next;notify('modeStatus',next==='free'?'Bepul rejim faol':'Professional AI faol: API xarajati yuzaga kelishi mumkin.');});
 
 // V18: boshqaruv ishlashini brauzerda tekshirish uchun ochiq diagnostika.
-window.lectorDiagnostics=()=>({version:'20',startBound:typeof $('start').onclick==='function',addBound:typeof $('add').onclick==='function',recognitionSupported:!!(window.SpeechRecognition||window.webkitSpeechRecognition),secureContext:window.isSecureContext,entries:entries.length,recognitionRunning,listening});
+window.lectorDiagnostics=()=>({version:'22',startBound:typeof $('start').onclick==='function',addBound:typeof $('add').onclick==='function',recognitionSupported:!!(window.SpeechRecognition||window.webkitSpeechRecognition),secureContext:window.isSecureContext,entries:entries.length,recognitionRunning,listening,micLastError,micLastEvent,micLastResultAt,micLastStartAt,micLastEndAt,micRetryCount});
