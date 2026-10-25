@@ -12,7 +12,7 @@ $('terms').value=getStored('lector_terms_v13',defaultTerms.join('\n'));
 $('corrections').value=getStored('lector_corrections_v13','elektro kimyo => elektrokimyo\nelektro liz => elektroliz');
 $('saveTerms').onclick=()=>{try{localStorage.setItem('lector_terms_v13',$('terms').value);localStorage.setItem('lector_corrections_v13',$('corrections').value)}catch{};applyRecognitionHints();notify('micstatus','Ilmiy terminlar lug‘ati saqlandi')};
 function correctedTranscript(input){let t=String(input||'');for(const line of $('corrections').value.split(/\r?\n/)){const parts=line.split('=>');if(parts.length!==2)continue;const from=parts[0].trim(),to=parts[1].trim();if(!from||!to||from.length>100||to.length>100)continue;const escaped=from.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');try{t=t.replace(new RegExp('(^|[^\\p{L}\\p{N}])('+escaped+')(?=$|[^\\p{L}\\p{N}])','giu'),(_m,prefix)=>prefix+to)}catch{}}return t}
-function applyRecognitionHints(){if(!recognition||!('phrases' in recognition)||!('SpeechRecognitionPhrase' in window))return;try{const words=$('terms').value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean).slice(0,100);recognition.phrases=words.map(x=>new window.SpeechRecognitionPhrase(x,5))}catch(e){logSpeech('Term hints not supported: '+e.message)}}
+function applyRecognitionHints(){/* V23: Chrome uz-UZ rejects SpeechRecognition.phrases (phrases-not-supported). Keep glossary corrections only. */}
 function logSpeech(msg){if(!$('speechDebug').checked)return;const el=$('speechLog');el.textContent=(new Date().toLocaleTimeString()+' '+msg+'\n'+el.textContent).slice(0,7000)}
 let lastRenderedInterim='';
 
@@ -149,7 +149,7 @@ $('start').onclick=async()=>{
  if(!micStarting)return;
  try{
   recognition=new SR();recognition.lang=speechLang[$('source').value];recognition.continuous=false;
-  recognition.interimResults=true;recognition.maxAlternatives=1;applyRecognitionHints();
+  recognition.interimResults=true;recognition.maxAlternatives=1; // V23: do not set recognition.phrases
  }catch(e){micStarting=false;resetMicButtons();notify('micstatus','Nutqni aniqlash ishga tushmadi: '+e.message);return}
  listening=true;micStarting=false;micRetryCount=0;micLastError='';lastAcceptedSpeech='';recognitionRunning=false;micLastInterim='';micLastEvent='starting';
  voiceSeenAt=Date.now();recognitionStartedAt=Date.now();
@@ -257,4 +257,4 @@ const diagnostics=document.getElementById('diagnostics');if(diagnostics){const i
 $('translationMode').addEventListener('change',async()=>{const next=$('translationMode').value;if(next==='professional'&&!professionalAvailable){$('translationMode').value=activeMode;notify('modeStatus','Professional AI ulanmagan. Serverda OPENAI_API_KEY sozlash kerak.');return}if(next==='professional'&&!session){$('translationMode').value=activeMode;notify('modeStatus','Professional AI uchun avval sessiya yarating.');return}if(session){try{const r=await fetch('/api/mode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:session.id,key:session.key,mode:next})});const j=await r.json();if(!r.ok)throw Error(j.error||'Rejim almashtirilmadi')}catch(e){$('translationMode').value=activeMode;notify('modeStatus',e.message);return}}activeMode=next;notify('modeStatus',next==='free'?'Bepul rejim faol':'Professional AI faol: API xarajati yuzaga kelishi mumkin.');});
 
 // V18: boshqaruv ishlashini brauzerda tekshirish uchun ochiq diagnostika.
-window.lectorDiagnostics=()=>({version:'22',startBound:typeof $('start').onclick==='function',addBound:typeof $('add').onclick==='function',recognitionSupported:!!(window.SpeechRecognition||window.webkitSpeechRecognition),secureContext:window.isSecureContext,entries:entries.length,recognitionRunning,listening,micLastError,micLastEvent,micLastResultAt,micLastStartAt,micLastEndAt,micRetryCount});
+window.lectorDiagnostics=()=>({version:'23',startBound:typeof $('start').onclick==='function',addBound:typeof $('add').onclick==='function',recognitionSupported:!!(window.SpeechRecognition||window.webkitSpeechRecognition),secureContext:window.isSecureContext,entries:entries.length,recognitionRunning,listening,micLastError,micLastEvent,micLastResultAt,micLastStartAt,micLastEndAt,micRetryCount});
