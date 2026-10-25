@@ -87,7 +87,8 @@ function acceptRecognizedSpeech(result){
  // during speech is stronger evidence than the final callback timestamp.
  const hasRecentVoice=voiceSeenAt>lastVoiceAtRecognitionStart && now-voiceSeenAt<2600;
  const hasInterimEvidence=lastInterimVoiceAt>lastVoiceAtRecognitionStart && now-lastInterimVoiceAt<4500;
- if(speechGateEnabled&&!hasRecentVoice&&!hasInterimEvidence)return false;
+ // V17: browser speech recognition is authoritative; audio gate may miss quiet voices.
+ // Do not discard real recognized words solely because the analyser missed them.
  logSpeech('FINAL raw: '+JSON.stringify(text)+' confidence='+result?.confidence);
  const rawKey=normalizeSpeech(text);
  if(previousResultKeys.has(rawKey))return false;
@@ -100,7 +101,7 @@ function acceptRecognizedSpeech(result){
  // A purely numeric final result without corroborating interim evidence is
  // withheld, rather than deleting numeric values within spoken sentences.
  if(/^\d+$/.test(text)&&!hasInterimEvidence)return false;
- if(isSuspiciousSilence(text)&&!hasInterimEvidence)return false;
+ // Do not reject valid final transcripts on uncertain silence detection.
  const confidence=Number(result?.confidence);
  if(Number.isFinite(confidence)&&confidence>0&&confidence<0.25)return false;
  const norm=normalizeSpeech(text);
@@ -111,7 +112,9 @@ $('start').onclick=async()=>{
  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
  if(!SR){notify('micstatus','Bu brauzerda nutqni aniqlash mavjud emas. Chrome/Edge sinab ko‘ring.');return}
  if(!window.isSecureContext){notify('micstatus','Mikrofon uchun HTTPS yoki localhost kerak');return}
- await setupVoiceGate();voiceSeenAt=Date.now();recognitionStartedAt=Date.now();
+ // Avoid a second getUserMedia request before SpeechRecognition.start(): it can
+ // block recognition startup on some browsers/devices.
+ voiceSeenAt=Date.now();recognitionStartedAt=Date.now();
  recognition=new SR();recognition.lang=speechLang[$('source').value];recognition.continuous=true;recognition.interimResults=true;applyRecognitionHints();
  listening=true;lastAcceptedSpeech='';recognitionRunning=false;
  recognition.onstart=()=>{recognitionStartedAt=Date.now();previousResultKeys.clear();lastRenderedInterim='';lastInterimText='';lastInterimVoiceAt=0;lastInterimAt=0;lastVoiceAtRecognitionStart=voiceSeenAt;recognitionRunning=true;if(!speechPlayback)notify('micstatus','Mikrofon faol')};
@@ -130,9 +133,9 @@ $('start').onclick=async()=>{
   }
   if(interim)notify('micstatus','Eshitilmoqda: '+interim.slice(0,160));else notify('micstatus','Mikrofon faol');
  };
- recognition.onerror=e=>{logSpeech('ERROR: '+e.error);if(!speechPlayback)notify('micstatus','Mikrofon/nutq xatosi: '+e.error);if(['not-allowed','service-not-allowed'].includes(e.error)){$('stop').click()}};
+ recognition.onerror=e=>{logSpeech('ERROR: '+e.error);if(!speechPlayback)notify('micstatus','Mikrofon/nutq xatosi: '+e.error+(e.error==='not-allowed'?' — manzil yonidagi qulf/sozlama belgisidan mikrofonni ruxsat qiling.':e.error==='network'?' — Chrome nutqni tanish xizmati internetga ulanolmadi.':e.error==='audio-capture'?' — mikrofon topilmadi yoki boshqa dastur band qilgan.':''));if(['not-allowed','service-not-allowed','audio-capture','language-not-supported'].includes(e.error)){$('stop').click()}};
  recognition.onend=()=>{logSpeech('END; restarting if needed');recognitionRunning=false;restartRecognition()};
- try{recognition.start();$('start').disabled=true;$('stop').disabled=false;notify('micstatus','Mikrofon ishga tushmoqda...')}catch(e){listening=false;notify('micstatus',e.message)}
+ try{recognition.start();$('start').disabled=true;$('stop').disabled=false;notify('micstatus','Mikrofon ishga tushmoqda... Ruxsat so‘ralsa, Allow tugmasini bosing.')}catch(e){listening=false;$('start').disabled=false;$('stop').disabled=true;notify('micstatus','Mikrofonni boshlash xatosi: '+e.message)}
 };
 $('stop').onclick=()=>{listening=false;stopVoiceGate();clearTimeout(restartTimer);if(recognition)recognition.abort();$('start').disabled=false;$('stop').disabled=true;notify('micstatus','Nutqni aniqlash to‘xtatildi')};
 $('create').onclick=async()=>{try{const r=await fetch('/api/create',{method:'POST'});if(!r.ok)throw Error('Server javob bermadi: '+r.status);session=await r.json();if(activeMode==='professional'){const mr=await fetch('/api/mode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:session.id,key:session.key,mode:activeMode})});if(!mr.ok){activeMode='free';$('translationMode').value='free';notify('modeStatus','Professional AI rejimini yoqib bo‘lmadi; bepul rejimga qaytildi')}}const url=new URL(location.href);url.searchParams.set('room',session.id);$('session').textContent='Kod: '+session.id+' | '+url.toString();$('copy').disabled=false;clearInterval(statsTimer);statsTimer=setInterval(updateStats,2500);updateStats()}catch(e){$('session').textContent=e.message}};$('copy').onclick=async()=>{if(!session)return;const url=new URL(location.href);url.searchParams.set('room',session.id);try{if(navigator.clipboard&&window.isSecureContext)await navigator.clipboard.writeText(url.toString());else{const t=document.createElement('textarea');t.value=url.toString();document.body.append(t);t.select();if(!document.execCommand('copy'))throw Error('copy');t.remove()}notify('micstatus','Dars havolasi nusxalandi')}catch{prompt('Havolani nusxalang:',url.toString())}};

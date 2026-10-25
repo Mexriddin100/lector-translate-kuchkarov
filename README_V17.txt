@@ -1,0 +1,1 @@
+V17: mikrofonni boshlashda ortiqcha getUserMedia chaqiruvi olib tashlandi; past ovozli nutqni yo‘qotuvchi audio-gate filtri o‘chirildi; mikrofon xatolari tushunarliroq ko‘rsatiladi. Chrome/Edge HTTPS va mikrofon ruxsati talab etiladi. Jonli qurilmada sinash zarur.
