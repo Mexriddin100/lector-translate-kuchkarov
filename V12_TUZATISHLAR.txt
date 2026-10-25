@@ -1,1 +1,0 @@
-V12: 30224 raqam artefaktini ajratish, yakuniy natijalarni interim va ovoz faolligi bilan tekshirish, takrorlarni cheklash. Bu muhitda mikrofonli sinov o‘tkazilmagan.\n
