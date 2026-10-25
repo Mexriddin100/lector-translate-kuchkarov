@@ -59,7 +59,7 @@ async function translate(text,source,target,modeOverride){if(source===target)ret
 function restartRecognition(){
  if(!listening||speechPlayback||!recognition||recognitionRunning)return;
  clearTimeout(restartTimer);
- restartTimer=setTimeout(()=>{if(listening&&!speechPlayback&&!recognitionRunning){try{recognition.start()}catch(e){notify('micstatus','Mikrofon qayta ishga tushmadi: '+e.message)}}},900);
+ restartTimer=setTimeout(()=>{if(listening&&!speechPlayback&&!recognitionRunning){try{recognition.start()}catch(e){logSpeech('RESTART ERROR: '+e.message);stopMicSession('Mikrofon qayta ishga tushmadi: '+e.message)}}},900);
 }
 function say(text,lang){
  if(!$('speak').checked||!('speechSynthesis'in window))return;
@@ -108,36 +108,97 @@ function acceptRecognizedSpeech(result){
  if(norm===lastAcceptedSpeech&&now-lastAcceptedAt<12000)return false;
  lastAcceptedSpeech=norm;lastAcceptedAt=now;logSpeech('ACCEPT: '+text);addText(text);return true;
 }
-$('start').onclick=()=>{
+// V21: permission check, observable start, bounded retries and actionable errors.
+let micStartupTimer=null, micRetryCount=0, micLastError='', micStarting=false;
+function resetMicButtons(){ $('start').disabled=false; $('stop').disabled=true; }
+function stopMicSession(message){
+ listening=false;micStarting=false;recognitionRunning=false;clearTimeout(restartTimer);clearTimeout(micStartupTimer);
+ stopVoiceGate();if(recognition){try{recognition.abort()}catch{}}resetMicButtons();
+ if(message)notify('micstatus',message);
+}
+function microphoneErrorMessage(error){
+ const messages={
+ 'not-allowed':'Mikrofonga ruxsat berilmagan. Sayt manzili yonidagi belgi → Sayt sozlamalari → Mikrofon → Ruxsat berish.',
+ 'service-not-allowed':'Brauzer nutqni aniqlash xizmatiga ruxsat bermadi. Chrome yoki Edge brauzerini tekshiring.',
+ 'audio-capture':'Mikrofon topilmadi yoki band. Windows mikrofon sozlamalarini tekshiring.',
+ 'network':'Brauzerning nutqni aniqlash xizmati internetga ulana olmadi. Internetni va Chrome/Edge xizmatini tekshiring.',
+ 'language-not-supported':'Tanlangan ma’ruza tilida nutqni tanish brauzer tomonidan qo‘llab-quvvatlanmayapti.',
+ 'no-speech':'Nutq eshitilmadi. Mikrofon yaqinida gapiring.',
+ 'aborted':'Nutqni aniqlash to‘xtatildi.'};
+ return messages[error]||('Nutqni tanish xatosi: '+error);
+}
+$('start').onclick=async()=>{
+ if(listening||micStarting)return;
  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
- if(!SR){notify('micstatus','Nutqni aniqlash qo‘llab-quvvatlanmaydi. Kompyuterda Chrome/Edge ishlating; qo‘lda matn qo‘shish ishlaydi.');return}
- if(!window.isSecureContext){notify('micstatus','Mikrofon uchun HTTPS yoki localhost kerak');return}
- // Avoid a second getUserMedia request before SpeechRecognition.start(): it can
- // block recognition startup on some browsers/devices.
+ if(!SR){notify('micstatus','Bu brauzer nutqni tanishni qo‘llamaydi. Kompyuterda yangilangan Chrome yoki Edge brauzerini ishlating.');return}
+ if(!window.isSecureContext){notify('micstatus','Mikrofon uchun HTTPS kerak. Render sayti https:// orqali ochilsin.');return}
+ micStarting=true;$('start').disabled=true;$('stop').disabled=false;
+ notify('micstatus','Mikrofon ruxsati tekshirilmoqda...');
+ try{
+  if(!navigator.mediaDevices?.getUserMedia)throw new Error('Brauzer mikrofonni ochish imkoniyatini bermadi.');
+  // Check the actual device permission and release it before SpeechRecognition owns the microphone.
+  const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+  stream.getTracks().forEach(track=>track.stop());
+ }catch(e){
+  const reason=e.name==='NotAllowedError'||e.name==='PermissionDeniedError'?'Mikrofonga ruxsat berilmagan. Manzil yonidagi belgi orqali ruxsat bering.':
+   e.name==='NotFoundError'?'Mikrofon topilmadi. Kompyuter mikrofonini ulang yoki sozlamadan tanlang.':
+   e.name==='NotReadableError'?'Mikrofonni boshqa dastur band qilgan. Boshqa dasturlarni yoping.':e.message;
+  micStarting=false;resetMicButtons();notify('micstatus',reason);return;
+ }
+ if(!micStarting)return;
+ try{
+  recognition=new SR();recognition.lang=speechLang[$('source').value];recognition.continuous=true;
+  recognition.interimResults=true;recognition.maxAlternatives=1;applyRecognitionHints();
+ }catch(e){micStarting=false;resetMicButtons();notify('micstatus','Nutqni aniqlash ishga tushmadi: '+e.message);return}
+ listening=true;micStarting=false;micRetryCount=0;micLastError='';lastAcceptedSpeech='';recognitionRunning=false;
  voiceSeenAt=Date.now();recognitionStartedAt=Date.now();
- try{recognition=new SR();recognition.lang=speechLang[$('source').value];recognition.continuous=true;recognition.interimResults=true;applyRecognitionHints()}catch(e){notify('micstatus','Nutqni tanish xizmatini yaratib bo‘lmadi: '+e.message);return}
- listening=true;lastAcceptedSpeech='';recognitionRunning=false;
- recognition.onstart=()=>{recognitionStartedAt=Date.now();previousResultKeys.clear();lastRenderedInterim='';lastInterimText='';lastInterimVoiceAt=0;lastInterimAt=0;lastVoiceAtRecognitionStart=voiceSeenAt;recognitionRunning=true;if(!speechPlayback)notify('micstatus','Mikrofon faol')};
+ recognition.onstart=()=>{
+  clearTimeout(micStartupTimer);micRetryCount=0;micLastError='';recognitionStartedAt=Date.now();
+  previousResultKeys.clear();lastRenderedInterim='';lastInterimText='';lastInterimVoiceAt=0;
+  lastInterimAt=0;lastVoiceAtRecognitionStart=voiceSeenAt;recognitionRunning=true;
+  if(!speechPlayback)notify('micstatus','🎙 Mikrofon faol. Gapiring — nutq stenogrammada paydo bo‘ladi.');
+ };
  recognition.onresult=e=>{
   if(speechPlayback||!listening)return;
   let interim='';
   for(let i=e.resultIndex;i<e.results.length;i++){
    const result=e.results[i],candidate=result[0];
-   if(result.isFinal)acceptRecognizedSpeech(candidate);else {
-    interim+=candidate.transcript;
-    lastInterimText=candidate.transcript;
+   if(result.isFinal)acceptRecognizedSpeech(candidate);
+   else{
+    interim+=candidate.transcript;lastInterimText=candidate.transcript;
     if(lastRenderedInterim!==candidate.transcript){lastRenderedInterim=candidate.transcript;logSpeech('INTERIM: '+JSON.stringify(candidate.transcript))}
-    lastInterimAt=Date.now();
-    if(!speechGateEnabled||Date.now()-voiceSeenAt<550)lastInterimVoiceAt=Date.now();
+    lastInterimAt=Date.now();if(!speechGateEnabled||Date.now()-voiceSeenAt<550)lastInterimVoiceAt=Date.now();
    }
   }
-  if(interim)notify('micstatus','Eshitilmoqda: '+interim.slice(0,160));else notify('micstatus','Mikrofon faol');
+  if(interim)notify('micstatus','Eshitilmoqda: '+interim.slice(0,160));
+  else notify('micstatus','🎙 Mikrofon faol');
  };
- recognition.onerror=e=>{logSpeech('ERROR: '+e.error);if(!speechPlayback)notify('micstatus','Mikrofon/nutq xatosi: '+e.error+(e.error==='not-allowed'?' — manzil yonidagi qulf/sozlama belgisidan mikrofonni ruxsat qiling.':e.error==='network'?' — Chrome nutqni tanish xizmati internetga ulanolmadi.':e.error==='audio-capture'?' — mikrofon topilmadi yoki boshqa dastur band qilgan.':''));if(['not-allowed','service-not-allowed','audio-capture','language-not-supported'].includes(e.error)){listening=false;clearTimeout(restartTimer);$('start').disabled=false;$('stop').disabled=true;}};
- recognition.onend=()=>{logSpeech('END; restarting if needed');recognitionRunning=false;restartRecognition()};
- try{recognition.start();$('start').disabled=true;$('stop').disabled=false;notify('micstatus','Nutqni aniqlash ishga tushmoqda. Chrome mikrofon ruxsatini so‘rasa, «Ruxsat berish»ni tanlang.')}catch(e){listening=false;$('start').disabled=false;$('stop').disabled=true;notify('micstatus','Mikrofonni boshlash xatosi: '+e.message)}
+ recognition.onerror=e=>{
+  logSpeech('ERROR: '+e.error);micLastError=e.error;
+  if(e.error==='aborted'&&(!listening||speechPlayback))return;
+  if(e.error==='no-speech'){notify('micstatus','Nutq eshitilmadi; qayta tinglashga urinilmoqda.');return}
+  notify('micstatus',microphoneErrorMessage(e.error));
+  if(['not-allowed','service-not-allowed','audio-capture','language-not-supported','network'].includes(e.error)){
+   stopMicSession(microphoneErrorMessage(e.error));
+  }
+ };
+ recognition.onend=()=>{
+  logSpeech('END; listening='+listening+' error='+micLastError);recognitionRunning=false;
+  if(!listening||speechPlayback)return;
+  if(++micRetryCount>8){stopMicSession('Nutqni aniqlash takroran uzildi. Chrome/Edge va internetni tekshiring, so‘ng qayta boshlang.');return}
+  notify('micstatus','Mikrofon qayta ulanmoqda ('+micRetryCount+'/8)...');restartRecognition();
+ };
+ try{
+  recognition.start();
+  notify('micstatus','Mikrofon ruxsat berilgan. Nutqni tanish xizmati ishga tushmoqda...');
+  micStartupTimer=setTimeout(()=>{
+   if(listening&&!recognitionRunning){
+    stopMicSession('Nutqni tanish xizmati javob bermadi (12 soniya). Chrome/Edge brauzerini va internetni tekshiring.');
+   }
+  },12000);
+ }catch(e){stopMicSession('Mikrofonni boshlash xatosi: '+e.message)}
 };
-$('stop').onclick=()=>{listening=false;stopVoiceGate();clearTimeout(restartTimer);if(recognition)recognition.abort();$('start').disabled=false;$('stop').disabled=true;notify('micstatus','Nutqni aniqlash to‘xtatildi')};
+$('stop').onclick=()=>stopMicSession('Nutqni aniqlash to‘xtatildi');
 $('create').onclick=async()=>{try{const r=await fetch('/api/create',{method:'POST'});if(!r.ok)throw Error('Server javob bermadi: '+r.status);session=await r.json();if(activeMode==='professional'){const mr=await fetch('/api/mode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:session.id,key:session.key,mode:activeMode})});if(!mr.ok){activeMode='free';$('translationMode').value='free';notify('modeStatus','Professional AI rejimini yoqib bo‘lmadi; bepul rejimga qaytildi')}}const url=new URL(location.href);url.searchParams.set('room',session.id);$('session').textContent='Kod: '+session.id+' | '+url.toString();$('copy').disabled=false;clearInterval(statsTimer);statsTimer=setInterval(updateStats,2500);updateStats()}catch(e){$('session').textContent=e.message}};$('copy').onclick=async()=>{if(!session)return;const url=new URL(location.href);url.searchParams.set('room',session.id);try{if(navigator.clipboard&&window.isSecureContext)await navigator.clipboard.writeText(url.toString());else{const t=document.createElement('textarea');t.value=url.toString();document.body.append(t);t.select();if(!document.execCommand('copy'))throw Error('copy');t.remove()}notify('micstatus','Dars havolasi nusxalandi')}catch{prompt('Havolani nusxalang:',url.toString())}};
 async function fetchEvents(){if(!joined)return;try{const r=await fetch('/api/events?id='+encodeURIComponent(joined)+'&since='+seq+'&participant='+encodeURIComponent(participantId)+'&token='+encodeURIComponent(studentToken||''));const d=await r.json();if(!r.ok)throw Error(d.error);for(const e of d.events){seq=Math.max(seq,e.seq);if(e.type==='end')continue;const box=$('studentText');if(box.querySelector('.placeholder'))box.innerHTML='';const p=document.createElement('p');p.textContent='Tarjima qilinmoqda...';box.append(p);try{const out=await translate(e.text,e.lang,$('studentLang').value,e.mode||'free');p.textContent=out;say(out,$('studentLang').value)}catch(err){p.textContent='[Asl matn] '+e.text;notify('joinStatus','Tarjima xizmati mavjud emas: '+err.message)}box.scrollTop=box.scrollHeight}notify('joinStatus','Sessiyaga ulangan · kod '+joined)}catch(e){notify('joinStatus','Ulanish muammosi: '+e.message)}}
 $('join').onclick=async()=>{const id=$('joinCode').value.trim();if(!/^\d{6}$/.test(id)){notify('joinStatus','6 xonali kod kiriting');return}try{const r=await fetch('/api/presence',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,participant:participantId,lang:$('studentLang').value,audio:$('speak').checked,action:'join'})});if(!r.ok)throw Error('Sessiya topilmadi yoki server ishlamayapti');studentToken=(await r.json()).token}catch(e){notify('joinStatus',e.message);return}joined=id;seq=0;await presence('join');clearInterval(presenceTimer);presenceTimer=setInterval(()=>presence('heartbeat'),7000);$('studentText').innerHTML='';clearInterval(poll);poll=setInterval(fetchEvents,1800);fetchEvents();$('join').disabled=true;$('leave').disabled=false};$('leave').onclick=()=>{presence('leave');joined=null;studentToken=null;clearInterval(presenceTimer);clearInterval(poll);$('join').disabled=false;$('leave').disabled=true;notify('joinStatus','Sessiyadan chiqildi')};
@@ -185,4 +246,4 @@ const diagnostics=document.getElementById('diagnostics');if(diagnostics){const i
 $('translationMode').addEventListener('change',async()=>{const next=$('translationMode').value;if(next==='professional'&&!professionalAvailable){$('translationMode').value=activeMode;notify('modeStatus','Professional AI ulanmagan. Serverda OPENAI_API_KEY sozlash kerak.');return}if(next==='professional'&&!session){$('translationMode').value=activeMode;notify('modeStatus','Professional AI uchun avval sessiya yarating.');return}if(session){try{const r=await fetch('/api/mode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:session.id,key:session.key,mode:next})});const j=await r.json();if(!r.ok)throw Error(j.error||'Rejim almashtirilmadi')}catch(e){$('translationMode').value=activeMode;notify('modeStatus',e.message);return}}activeMode=next;notify('modeStatus',next==='free'?'Bepul rejim faol':'Professional AI faol: API xarajati yuzaga kelishi mumkin.');});
 
 // V18: boshqaruv ishlashini brauzerda tekshirish uchun ochiq diagnostika.
-window.lectorDiagnostics=()=>({version:'18',startBound:typeof $('start').onclick==='function',addBound:typeof $('add').onclick==='function',recognitionSupported:!!(window.SpeechRecognition||window.webkitSpeechRecognition),secureContext:window.isSecureContext,entries:entries.length,recognitionRunning,listening});
+window.lectorDiagnostics=()=>({version:'20',startBound:typeof $('start').onclick==='function',addBound:typeof $('add').onclick==='function',recognitionSupported:!!(window.SpeechRecognition||window.webkitSpeechRecognition),secureContext:window.isSecureContext,entries:entries.length,recognitionRunning,listening});

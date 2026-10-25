@@ -7,11 +7,37 @@ const TTL=6*3600000,MAX_BODY=16000;
 const OPENAI_KEY=process.env.OPENAI_API_KEY||'';
 const MYMEMORY='https://api.mymemory.translated.net/get';
 const MM_LANG={uz:'uz-UZ',en:'en-GB',ru:'ru-RU',tr:'tr-TR',hi:'hi-IN',kk:'kk-KZ',ky:'ky-KG',tg:'tg-TJ',tk:'tk-TM',zh:'zh-CN'};
+// Bepul tartib: MyMemory -> faqat sozlangan LibreTranslate zaxirasi.
+// Hech qanday ishlamaydigan ommaviy endpoint avtomatik taxmin qilinmaydi.
+async function libreFallback(b){
+  if(!PROVIDER)throw new Error('LibreTranslate zaxira serveri sozlanmagan (LIBRETRANSLATE_URL).');
+  const ctrl=new AbortController(),timer=setTimeout(()=>ctrl.abort(),12000);
+  try{
+    const r=await fetch(PROVIDER+'/translate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({q:b.text,source:b.source,target:b.target,format:'text',...(process.env.LIBRETRANSLATE_API_KEY?{api_key:process.env.LIBRETRANSLATE_API_KEY}:{})}),signal:ctrl.signal});
+    const d=await r.json();
+    if(!r.ok||typeof d?.translatedText!=='string'||!d.translatedText.trim())throw Error('LibreTranslate HTTP '+r.status+'; til yoki server cheklovi');
+    return {translatedText:d.translatedText,provider:'LibreTranslate (zaxira)',warning:'MyMemory ishlamagani uchun zaxira xizmat ishlatildi.'};
+  }finally{clearTimeout(timer)}
+}
 async function freeTranslate(b){
-  if(PROVIDER){const ctrl=new AbortController(),timer=setTimeout(()=>ctrl.abort(),18000);try{const r=await fetch(PROVIDER+'/translate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({q:b.text,source:b.source,target:b.target,format:'text',api_key:process.env.LIBRETRANSLATE_API_KEY||undefined}),signal:ctrl.signal});const data=await r.json();if(!r.ok||typeof data.translatedText!=='string')throw Error('LibreTranslate provider error');return {translatedText:data.translatedText,provider:'LibreTranslate'};}finally{clearTimeout(timer)}}
-  if(b.text.length>450)throw Object.assign(new Error('Bepul MyMemory rejimida har bir matn bo‘lagi 450 belgidan oshmasin.'),{status:400});
-  const url=new URL(MYMEMORY);url.searchParams.set('q',b.text);url.searchParams.set('langpair',MM_LANG[b.source]+'|'+MM_LANG[b.target]);
-  const ctrl=new AbortController(),timer=setTimeout(()=>ctrl.abort(),15000);try{const r=await fetch(url,{headers:{'Accept':'application/json'},signal:ctrl.signal});const data=await r.json();const t=data?.responseData?.translatedText;const status=Number(data?.responseStatus||r.status);if(!r.ok||status!==200||typeof t!=='string'||!t.trim())throw Object.assign(new Error('Bepul tarjima xizmati bu til juftligini yoki so‘rovni bajara olmadi. Limit tugagan bo‘lishi mumkin.'),{status:502});return {translatedText:t,provider:'MyMemory (bepul)',warning:'Bepul xizmat: sifat va til qamrovi kafolatlanmaydi.'};}finally{clearTimeout(timer)}
+  let error='';
+  if(b.text.length<=450){
+    const pairs=[`${MM_LANG[b.source]}|${MM_LANG[b.target]}`,`${b.source}|${b.target}`];
+    for(const pair of [...new Set(pairs)]){
+      const url=new URL(MYMEMORY);url.searchParams.set('q',b.text);url.searchParams.set('langpair',pair);
+      const ctrl=new AbortController(),timer=setTimeout(()=>ctrl.abort(),9000);
+      try{
+        const r=await fetch(url,{headers:{Accept:'application/json'},signal:ctrl.signal});
+        const d=await r.json();const t=d?.responseData?.translatedText;const status=Number(d?.responseStatus??r.status);
+        if(r.ok&&status===200&&typeof t==='string'&&t.trim()&&!/^(?:INVALID LANGUAGE PAIR|NO QUERY SPECIFIED)/i.test(t))return {translatedText:t,provider:'MyMemory (bepul)'};
+        error=String(d?.responseDetails||`HTTP ${r.status}; status ${status}`).slice(0,140);
+        if(r.status===429||status===429)break;
+      }catch(e){error=e.name==='AbortError'?'MyMemory vaqti tugadi':String(e.message).slice(0,140)}
+      finally{clearTimeout(timer)}
+    }
+  }else error='MyMemory uchun 450 belgidan uzun matn';
+  if(PROVIDER){try{return await libreFallback(b)}catch(e){error+='; LibreTranslate: '+String(e.message).slice(0,140)}}
+  throw Object.assign(new Error('Bepul tarjima bajarilmadi: '+error+(PROVIDER?'':'. LibreTranslate zaxirasi ulanmagan. Render Environment bo‘limida LIBRETRANSLATE_URL sozlanishi kerak.')),{status:502});
 }
 async function proTranslate(b){const ctrl=new AbortController(),timer=setTimeout(()=>ctrl.abort(),25000);try{const r=await fetch('https://api.openai.com/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+OPENAI_KEY},body:JSON.stringify({model:process.env.OPENAI_MODEL||'gpt-4o-mini',temperature:0.1,messages:[{role:'system',content:'You are a professional academic lecture translator. Translate accurately into '+b.target+' from '+b.source+'. Preserve technical terminology, formulas and names. Return only the translation.'},{role:'user',content:b.text}] }),signal:ctrl.signal});const data=await r.json();const t=data?.choices?.[0]?.message?.content;if(!r.ok||typeof t!=='string')throw Object.assign(new Error('Professional AI xizmatida xatolik: '+(data?.error?.message||r.status)),{status:502});return {translatedText:t,provider:'OpenAI Professional'};}finally{clearTimeout(timer)}}
 function reply(res,status,obj){res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'});res.end(JSON.stringify(obj))}
@@ -34,7 +60,7 @@ http.createServer(async(req,res)=>{
   const api=u.pathname.startsWith('/api/');
   if(api&&limited(req,u.pathname==='/api/translate'?'translate':u.pathname==='/api/create'?'create':'api'))return fail(res,429,'Too many requests');
   try{
-    if(u.pathname==='/api/health'&&req.method==='GET')return reply(res,200,{ok:true,translationConfigured:true,freeProvider:PROVIDER?'LibreTranslate':'MyMemory',professionalAvailable:!!OPENAI_KEY});
+    if(u.pathname==='/api/health'&&req.method==='GET')return reply(res,200,{ok:true,translationConfigured:true,freeProvider:PROVIDER?'MyMemory → LibreTranslate (zaxira)':'MyMemory (LibreTranslate sozlanmagan)',libreFallbackConfigured:!!PROVIDER,professionalAvailable:!!OPENAI_KEY});
     if(u.pathname==='/api/create'&&req.method==='POST'){
       let id;do{id=String(crypto.randomInt(100000,1000000))}while(rooms.has(id));
       const key=crypto.randomBytes(32).toString('hex');rooms.set(id,{key,events:[],next:1,updated:Date.now(),participants:new Map(),mode:'free'});return reply(res,200,{id,key});

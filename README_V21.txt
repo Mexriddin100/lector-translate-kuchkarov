@@ -1,0 +1,1 @@
+V21: mikrofon ruxsati oldindan tekshiriladi; SpeechRecognition ishga tushish taymeri, xatoliklar izohi, qayta ulanish chegarasi va to‘xtatish holati tuzatildi. V20 bepul tarjima zaxira mexanizmi saqlandi. Mikrofonning haqiqiy ishlashi brauzerda tekshirilishi kerak.
