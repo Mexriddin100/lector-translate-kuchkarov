@@ -1,1 +1,0 @@
-v11: Audio RMS asosida jimlik nazorati; takroriy raqamli natijalarni filtrlash; qayta ishga tushirish pauzasi; stenogramma va tarjimani mustaqil tozalash. Audio filtri brauzer/mikrofon sharoitiga bog‘liq. Amaliy sinov talab qilinadi.
