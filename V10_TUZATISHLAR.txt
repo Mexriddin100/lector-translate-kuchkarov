@@ -1,7 +1,0 @@
-LECTOR TRANSLATE KUCHKAROV v10
-- Qisqa faqat raqamli (1-6 xonali) avtomatik tanilgan nutq rad etiladi. Bu filtr haqiqiy qisqa raqamlarni ham yashirishi mumkin; qo‘lda kiritish saqlangan.
-- Past confidence natijalari filtrlanadi.
-- Qisqa vaqt ichida takror kelgan bir xil natijalar filtrlanadi.
-- Ovozli tarjima o‘qilayotganda nutqni aniqlash vaqtincha to‘xtaydi, keyin davom etadi.
-- Bepul/Professional tarjima va sessiyalar saqlangan.
-- Brauzerga bog‘liq nutqni tanish xatolari to‘liq bartaraf etilishi kafolatlanmaydi.
