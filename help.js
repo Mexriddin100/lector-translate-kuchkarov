@@ -1,0 +1,1 @@
+document.addEventListener('DOMContentLoaded',()=>{const d=document.getElementById('helpDialog');document.getElementById('helpOpen')?.addEventListener('click',()=>d.showModal());document.getElementById('helpClose')?.addEventListener('click',()=>d.close());d?.addEventListener('click',e=>{if(e.target===d)d.close()})});

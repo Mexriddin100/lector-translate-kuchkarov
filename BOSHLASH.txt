@@ -1,0 +1,16 @@
+LECTOR TRANSLATE KUCHKAROV — BEPUL + PROFESSIONAL AI (v9)
+
+1. ZIP arxivni alohida papkaga oching.
+2. Shu papkaning manzil qatoriga cmd yozib Enter bosing.
+3. npm start deb Enter bosing.
+4. Chrome orqali http://localhost:3000 oching.
+5. O‘qituvchi panelida BEPUL rejim oldindan tanlangan.
+6. O‘zbek → ingliz tanlang, qisqa matn kiriting, «Matnni qo‘shish» tugmasini bosing.
+
+BEPUL: MyMemory umumiy API xizmati ishlatiladi. U internetni talab qiladi, kunlik limitlar va ayrim til juftliklari bo‘yicha cheklovlar bor. Ma’ruza matni tashqi servisga uzatiladi. Maxfiy ma’lumotlarni yubormang. 450 belgidan uzun bo‘laklarni qisqartiring. Bepul xizmatning uzluksiz ishlashi kafolatlanmaydi.
+
+PROFESSIONAL AI: OpenAI API kalitini faqat server muhitida OPENAI_API_KEY sifatida o‘rnating, dasturni qayta ishga tushiring. O‘qituvchi sessiya yaratgandan so‘ng Professional rejimni tanlashi mumkin. Bu rejim ixtiyoriy va xarajatli. ChatGPT Plus obunasi API to‘lovini qoplamaydi.
+
+Talabalarga internet orqali kirish uchun Node.js serverni HTTPS domeniga joylashtirish kerak. Localhost havolasi boshqa telefonda ishlamaydi. 
+
+Ovozli o‘qish brauzerda mavjud ovozlarga bog‘liq. 10 tilning hammasida sifatli ovoz va tarjima kafolatlanmaydi. Bu dasturda avtomatik OCR va Zoom integratsiyasi yo‘q.

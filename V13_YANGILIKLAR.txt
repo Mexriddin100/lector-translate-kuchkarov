@@ -1,0 +1,1 @@
+13.0: ilmiy terminlar lug‘ati, brauzer qo‘llasa SpeechRecognitionPhrase hints, foydalanuvchi tasdiqlagan xato=>to‘g‘ri tuzatishlar, har satrni tahrirlash va qayta tarjima, raw/interim/final nutq diagnostikasi. Bepul speech recognition sifatini kafolatlamaydi.
