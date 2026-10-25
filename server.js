@@ -89,6 +89,6 @@ http.createServer(async(req,res)=>{
     }
     if(api)return fail(res,404,'Unknown API');if(req.method!=='GET'&&req.method!=='HEAD')return fail(res,405,'Method not allowed');
     const allowed=new Set(['/','/index.html','/app.js','/help.js','/style.css','/theme.css','/muallif_kuchkarov.png','/favicon.ico']);if(!allowed.has(u.pathname))return fail(res,404,'Not found');
-    const file=u.pathname==='/'?'index.html':u.pathname.slice(1);fs.readFile(path.join(ROOT,file),(err,data)=>{if(err)return fail(res,404,'Not found');res.writeHead(200,{'Content-Type':mime[path.extname(file)]||'application/octet-stream','Cache-Control':'no-cache'});res.end(req.method==='HEAD'?undefined:data)});
+    const file=u.pathname==='/'?'index.html':u.pathname.slice(1);fs.readFile(path.join(ROOT,file),(err,data)=>{if(err)return fail(res,404,'Not found');res.writeHead(200,{'Content-Type':mime[path.extname(file)]||'application/octet-stream','Cache-Control':'no-store, max-age=0'});res.end(req.method==='HEAD'?undefined:data)});
   }catch(e){if(!res.headersSent)return fail(res,e.status||500,e.status?e.message:'Server error')}
 }).listen(PORT,()=>console.log('LECTOR TRANSLATE KUCHKAROV secure server listening on '+PORT));

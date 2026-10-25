@@ -71,8 +71,8 @@ function say(text,lang){
  try{speechSynthesis.speak(u)}catch{done()}
 }
 async function publish(text,lang){if(!session)return;try{await fetch('/api/publish',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:session.id,key:session.key,type:'text',text,lang})})}catch{notify('micstatus','Aloqa uzildi: sessiyaga yuborish amalga oshmadi')}}
-function addText(text){text=text.trim();if(!text)return;const generation=contentGeneration;const source=$('source').value,target=$('target').value;entries.push({text,lang:source});render();publish(text,source);if($('autoTranslate').checked)processing=processing.then(async()=>{try{const out=await translate(text,source,target);if(generation!==contentGeneration)return;translations.push(out);render();say(out,target);notify('translateStatus','Tarjima bajarildi')}catch(e){if(generation!==contentGeneration)return;translations.push('[Tarjima xatosi: '+e.message+']');render();notify('translateStatus',e.message)}})}
-$('add').onclick=()=>{addText($('manual').value);$('manual').value=''};
+function addText(text){text=String(text||'').trim();if(!text){notify('micstatus','Matn kiriting, so‘ng «Matnni qo‘shish» tugmasini bosing.');return false;}const generation=contentGeneration;const source=$('source').value,target=$('target').value;entries.push({text,lang:source});render();publish(text,source);if($('autoTranslate').checked)processing=processing.then(async()=>{try{const out=await translate(text,source,target);if(generation!==contentGeneration)return;translations.push(out);render();say(out,target);notify('translateStatus','Tarjima bajarildi')}catch(e){if(generation!==contentGeneration)return;translations.push('[Tarjima xatosi: '+e.message+']');render();notify('translateStatus',e.message)}});return true}
+$('add').onclick=()=>{const value=$('manual').value;if(addText(value)){$('manual').value='';notify('micstatus','Matn stenogrammaga qo‘shildi.')}};
 $('clear').onclick=()=>{if(confirm('Stenogramma tozalansinmi? Tarjima saqlanadi.')){entries=[];previousResultKeys.clear();render()}};
 $('clearTranslation').onclick=()=>{translations=[];contentGeneration++;render();notify('translateStatus','Tarjima oynasi tozalandi')};
 $('clearBoth').onclick=()=>{if(confirm('Stenogramma va tarjima birgalikda tozalansinmi?')){entries=[];translations=[];previousResultKeys.clear();contentGeneration++;render();notify('translateStatus','Ikkala oyna tozalandi')}};
@@ -103,23 +103,23 @@ function acceptRecognizedSpeech(result){
  if(/^\d+$/.test(text)&&!hasInterimEvidence)return false;
  // Do not reject valid final transcripts on uncertain silence detection.
  const confidence=Number(result?.confidence);
- if(Number.isFinite(confidence)&&confidence>0&&confidence<0.25)return false;
+ // Past confidence ham ko‘rinadi: noto‘g‘ri rad etishdan saqlanamiz.
  const norm=normalizeSpeech(text);
  if(norm===lastAcceptedSpeech&&now-lastAcceptedAt<12000)return false;
  lastAcceptedSpeech=norm;lastAcceptedAt=now;logSpeech('ACCEPT: '+text);addText(text);return true;
 }
-$('start').onclick=async()=>{
+$('start').onclick=()=>{
  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
- if(!SR){notify('micstatus','Bu brauzerda nutqni aniqlash mavjud emas. Chrome/Edge sinab ko‘ring.');return}
+ if(!SR){notify('micstatus','Nutqni aniqlash qo‘llab-quvvatlanmaydi. Kompyuterda Chrome/Edge ishlating; qo‘lda matn qo‘shish ishlaydi.');return}
  if(!window.isSecureContext){notify('micstatus','Mikrofon uchun HTTPS yoki localhost kerak');return}
  // Avoid a second getUserMedia request before SpeechRecognition.start(): it can
  // block recognition startup on some browsers/devices.
  voiceSeenAt=Date.now();recognitionStartedAt=Date.now();
- recognition=new SR();recognition.lang=speechLang[$('source').value];recognition.continuous=true;recognition.interimResults=true;applyRecognitionHints();
+ try{recognition=new SR();recognition.lang=speechLang[$('source').value];recognition.continuous=true;recognition.interimResults=true;applyRecognitionHints()}catch(e){notify('micstatus','Nutqni tanish xizmatini yaratib bo‘lmadi: '+e.message);return}
  listening=true;lastAcceptedSpeech='';recognitionRunning=false;
  recognition.onstart=()=>{recognitionStartedAt=Date.now();previousResultKeys.clear();lastRenderedInterim='';lastInterimText='';lastInterimVoiceAt=0;lastInterimAt=0;lastVoiceAtRecognitionStart=voiceSeenAt;recognitionRunning=true;if(!speechPlayback)notify('micstatus','Mikrofon faol')};
  recognition.onresult=e=>{
-  if(speechPlayback||!listening||Date.now()-recognitionStartedAt<350)return;
+  if(speechPlayback||!listening)return;
   let interim='';
   for(let i=e.resultIndex;i<e.results.length;i++){
    const result=e.results[i],candidate=result[0];
@@ -133,9 +133,9 @@ $('start').onclick=async()=>{
   }
   if(interim)notify('micstatus','Eshitilmoqda: '+interim.slice(0,160));else notify('micstatus','Mikrofon faol');
  };
- recognition.onerror=e=>{logSpeech('ERROR: '+e.error);if(!speechPlayback)notify('micstatus','Mikrofon/nutq xatosi: '+e.error+(e.error==='not-allowed'?' — manzil yonidagi qulf/sozlama belgisidan mikrofonni ruxsat qiling.':e.error==='network'?' — Chrome nutqni tanish xizmati internetga ulanolmadi.':e.error==='audio-capture'?' — mikrofon topilmadi yoki boshqa dastur band qilgan.':''));if(['not-allowed','service-not-allowed','audio-capture','language-not-supported'].includes(e.error)){$('stop').click()}};
+ recognition.onerror=e=>{logSpeech('ERROR: '+e.error);if(!speechPlayback)notify('micstatus','Mikrofon/nutq xatosi: '+e.error+(e.error==='not-allowed'?' — manzil yonidagi qulf/sozlama belgisidan mikrofonni ruxsat qiling.':e.error==='network'?' — Chrome nutqni tanish xizmati internetga ulanolmadi.':e.error==='audio-capture'?' — mikrofon topilmadi yoki boshqa dastur band qilgan.':''));if(['not-allowed','service-not-allowed','audio-capture','language-not-supported'].includes(e.error)){listening=false;clearTimeout(restartTimer);$('start').disabled=false;$('stop').disabled=true;}};
  recognition.onend=()=>{logSpeech('END; restarting if needed');recognitionRunning=false;restartRecognition()};
- try{recognition.start();$('start').disabled=true;$('stop').disabled=false;notify('micstatus','Mikrofon ishga tushmoqda... Ruxsat so‘ralsa, Allow tugmasini bosing.')}catch(e){listening=false;$('start').disabled=false;$('stop').disabled=true;notify('micstatus','Mikrofonni boshlash xatosi: '+e.message)}
+ try{recognition.start();$('start').disabled=true;$('stop').disabled=false;notify('micstatus','Nutqni aniqlash ishga tushmoqda. Chrome mikrofon ruxsatini so‘rasa, «Ruxsat berish»ni tanlang.')}catch(e){listening=false;$('start').disabled=false;$('stop').disabled=true;notify('micstatus','Mikrofonni boshlash xatosi: '+e.message)}
 };
 $('stop').onclick=()=>{listening=false;stopVoiceGate();clearTimeout(restartTimer);if(recognition)recognition.abort();$('start').disabled=false;$('stop').disabled=true;notify('micstatus','Nutqni aniqlash to‘xtatildi')};
 $('create').onclick=async()=>{try{const r=await fetch('/api/create',{method:'POST'});if(!r.ok)throw Error('Server javob bermadi: '+r.status);session=await r.json();if(activeMode==='professional'){const mr=await fetch('/api/mode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:session.id,key:session.key,mode:activeMode})});if(!mr.ok){activeMode='free';$('translationMode').value='free';notify('modeStatus','Professional AI rejimini yoqib bo‘lmadi; bepul rejimga qaytildi')}}const url=new URL(location.href);url.searchParams.set('room',session.id);$('session').textContent='Kod: '+session.id+' | '+url.toString();$('copy').disabled=false;clearInterval(statsTimer);statsTimer=setInterval(updateStats,2500);updateStats()}catch(e){$('session').textContent=e.message}};$('copy').onclick=async()=>{if(!session)return;const url=new URL(location.href);url.searchParams.set('room',session.id);try{if(navigator.clipboard&&window.isSecureContext)await navigator.clipboard.writeText(url.toString());else{const t=document.createElement('textarea');t.value=url.toString();document.body.append(t);t.select();if(!document.execCommand('copy'))throw Error('copy');t.remove()}notify('micstatus','Dars havolasi nusxalandi')}catch{prompt('Havolani nusxalang:',url.toString())}};
@@ -183,3 +183,6 @@ $('studentLang').addEventListener('change',()=>presence('heartbeat'));$('speak')
 const diagnostics=document.getElementById('diagnostics');if(diagnostics){const ids=['teacherTab','studentTab','uiLang','source','target','studentLang','start','stop','create','copy','join','leave','add','clear','translateAll','boardTranslate','boardAdd','pdf','txt'];const missing=ids.filter(id=>!document.getElementById(id));diagnostics.textContent=missing.length?'Missing controls: '+missing.join(', '):'19 ta boshqaruv elementi yuklandi. Server va tarjima xizmati alohida tekshiriladi.';}
 
 $('translationMode').addEventListener('change',async()=>{const next=$('translationMode').value;if(next==='professional'&&!professionalAvailable){$('translationMode').value=activeMode;notify('modeStatus','Professional AI ulanmagan. Serverda OPENAI_API_KEY sozlash kerak.');return}if(next==='professional'&&!session){$('translationMode').value=activeMode;notify('modeStatus','Professional AI uchun avval sessiya yarating.');return}if(session){try{const r=await fetch('/api/mode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:session.id,key:session.key,mode:next})});const j=await r.json();if(!r.ok)throw Error(j.error||'Rejim almashtirilmadi')}catch(e){$('translationMode').value=activeMode;notify('modeStatus',e.message);return}}activeMode=next;notify('modeStatus',next==='free'?'Bepul rejim faol':'Professional AI faol: API xarajati yuzaga kelishi mumkin.');});
+
+// V18: boshqaruv ishlashini brauzerda tekshirish uchun ochiq diagnostika.
+window.lectorDiagnostics=()=>({version:'18',startBound:typeof $('start').onclick==='function',addBound:typeof $('add').onclick==='function',recognitionSupported:!!(window.SpeechRecognition||window.webkitSpeechRecognition),secureContext:window.isSecureContext,entries:entries.length,recognitionRunning,listening});
